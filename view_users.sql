@@ -1,0 +1,1 @@
+SELECT * FROM social_credit_scores;
