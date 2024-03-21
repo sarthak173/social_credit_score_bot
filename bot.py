@@ -59,6 +59,7 @@ async def on_ready():
 
 @bot.command(name="bm")
 async def wish_gm(ctx):
+    #bm responds with gm
     response = "gm arctan"
     await ctx.send(response)
         
