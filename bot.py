@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from discord.ext import commands
 from sqlite3 import OperationalError
 
-from sql_utils import execute_query
+from sql_utils import execute_query, connect_and_get_guild
 from df_embed_utils import save_df_as_image
 
 
@@ -45,29 +45,29 @@ async def on_ready():
         print("Create Table Failed: ", msg)
     
 
-# @bot.event
-# async def on_message(message):
-    
-#     if message.author == bot.user:
-#         return
-    
-#     if "gm" in str(message.content).lower():
-#         if message.author.nick is not None and message.author != bot.user:
-#             response = f"gm {message.author.nick}" 
-#         response = f"gm {message.author.global_name}"
-#         await message.channel.send(response)
-
 @bot.command(name="bm")
-async def wish_gm(ctx):
+async def wish_arc_gm(ctx):
     response = "gm arctan"
     await ctx.send(response)
+
+@bot.command(name="gm")
+async def wish_gm(ctx):
+    if ctx.message.author == bot.user:
+        return
+    
+    if "gm" in str(ctx.message.content).lower():
+        if ctx.message.author.nick is not None:
+            response = f"gm {ctx.message.author.nick}"
+        else: 
+            response = f"gm {ctx.message.author.global_name}"
+        await ctx.send(response)
         
 @commands.command(name="view")
 async def view(ctx):
     conn = sqlite3.connect('social_credit.db')
     cursor = conn.cursor()
     curr_guild = ctx.guild
-    sql_query = f"SELECT * FROM social_credit_scores WHERE guild_id = {curr_guild.id}"
+    sql_query = f"SELECT * FROM social_credit_scores WHERE guild_id = {curr_guild.id} LIMIT 10"
     response = pd.read_sql_query(sql_query, conn)
     scores = response[["username", "credit_score"]]
     scores_dict = dict(zip(response['username'], response['credit_score']))
@@ -119,7 +119,61 @@ async def initialize(ctx):
     conn.close()
     await ctx.send(embed=embed)
 
+@commands.command(name="viewuser")
+async def view_user(ctx, username: str):
+    conn = sqlite3.connect('social_credit.db')
+    cursor = conn.cursor()
+    curr_guild = ctx.guild
+    sql_query = f"SELECT username, credit_score FROM social_credit_scores WHERE guild_id = {curr_guild.id} AND username = \"{username}\""
+    response = pd.read_sql_query(sql_query, conn)
+    if len(response) == 0:
+        embed = discord.Embed(description=f"🔴 **FAILURE**: User does not exist in {curr_guild.name}")
+        await ctx.send(embed=embed)
+        return
+    embed = discord.Embed(title="Social Credit Scores", description="Current Social Credit Scores")
+    embed.add_field(name=curr_guild.name, value=(response.to_markdown()), inline=True)
+    conn.close()
+    await ctx.send(embed=embed)
+
+@commands.command(name="update")
+async def update_table(ctx):
+    conn, cursor, curr_guild = connect_and_get_guild(ctx)
+    guild_members = []
+    member_id_dict = {}
+    for member in curr_guild.members:
+        if not member.bot:
+            guild_members.append(str(member))
+            member_id_dict[str(member)] = member.id
+    sql_query = f"SELECT username FROM social_credit_scores WHERE guild_id = {curr_guild.id}"
+    response = pd.read_sql_query(sql_query, conn)
+    db_members_list = response['username']
+    users_not_in_db = set(guild_members) - set(db_members_list)
+    values = []
+    members = [member async for member in curr_guild.fetch_members()]
+    for user in users_not_in_db:
+        missing_user = member_id_dict[user]
+        print(missing_user)
+        user_values = (missing_user, user, curr_guild.id, 500, False)
+        values.append(user_values)
+    for missing_user in values:
+        insert_sql = """INSERT INTO social_credit_scores (user_id, username, guild_id, credit_score, is_admin)
+                                VALUES (?, ?, ?, ?, ?)
+                """
+        try:
+            cursor.execute(insert_sql, missing_user)
+            conn.commit() 
+        except Exception as msg:
+            embed = discord.Embed(description=f"🔴 **FAILURE**: Could not add user to {curr_guild.name}")
+            await ctx.send(embed=embed)
+            return
+    conn.close()
+    embed = discord.Embed(description=f"🟢 **SUCCESS**: Table successfully updated for {curr_guild.name}")
+    await ctx.send(embed=embed)
+    
+
 bot.add_command(view)
 bot.add_command(initialize)
+bot.add_command(view_user)
+bot.add_command(update_table)
 
 bot.run(TOKEN)
