@@ -1,0 +1,1 @@
+CCP_ROLES = ["Drug Dealer", "Admin", "commie mod"]
